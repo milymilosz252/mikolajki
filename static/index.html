@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mikołajki</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: linear-gradient(135deg, #eff6ff, #f5f3ff);
+            color: #1e293b;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        main {
+            width: min(100%, 440px);
+            padding: 40px 32px;
+            text-align: center;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px #33415518;
+        }
+        h1 { margin: 0 0 10px; font-size: 2rem; }
+        p { color: #64748b; }
+        input {
+            display: block;
+            width: 100%;
+            margin-top: 12px;
+            padding: 12px 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            font: inherit;
+        }
+        input:focus-visible { outline: 3px solid #a5b4fc; border-color: #4f46e5; }
+        button.primary {
+            margin-top: 16px;
+            padding: 13px 28px;
+            border: 0;
+            border-radius: 10px;
+            background: #4f46e5;
+            color: white;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button.primary:hover { background: #4338ca; }
+        button.primary:disabled { background: #a5b4fc; cursor: default; }
+        button.primary:focus-visible { outline: 3px solid #a5b4fc; outline-offset: 3px; }
+        button.link {
+            margin-top: 20px;
+            border: 0;
+            background: none;
+            color: #64748b;
+            font: inherit;
+            font-size: .9rem;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #result { min-height: 2.5rem; margin: 24px 0 0; color: #4f46e5; font-size: 1.7rem; font-weight: 700; }
+        #status { min-height: 1.5rem; margin-bottom: 0; font-size: .9rem; }
+        #status.error { color: #dc2626; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Mikołajki 🎁</h1>
+
+        <!-- Logowanie -->
+        <section id="login-view" hidden>
+            <p>Zaloguj się swoim imieniem i hasłem.</p>
+            <form id="login-form">
+                <input id="name" type="text" placeholder="Imię" autocomplete="username" required>
+                <input id="password" type="password" placeholder="Hasło" autocomplete="current-password" required>
+                <button class="primary" type="submit">Zaloguj</button>
+            </form>
+        </section>
+
+        <!-- Losowanie -->
+        <section id="draw-view" hidden>
+            <p id="greeting"></p>
+            <button id="draw-button" class="primary" type="button">Losuj</button>
+            <div id="result" aria-live="polite"></div>
+            <button id="logout" class="link" type="button">Wyloguj</button>
+        </section>
+
+        <p id="status" role="status"></p>
+    </main>
+
+    <script>
+        const $ = (s) => document.querySelector(s);
+        const loginView = $('#login-view');
+        const drawView = $('#draw-view');
+        const statusEl = $('#status');
+        const result = $('#result');
+        const drawButton = $('#draw-button');
+
+        function setStatus(text, isError = false) {
+            statusEl.textContent = text;
+            statusEl.classList.toggle('error', isError);
+        }
+
+        async function api(path, method = 'GET', body) {
+            const response = await fetch(path, {
+                method,
+                headers: body ? { 'Content-Type': 'application/json' } : undefined,
+                body: body ? JSON.stringify(body) : undefined,
+                credentials: 'same-origin',
+            });
+            const data = await response.json().catch(() => ({}));
+            return { ok: response.ok, status: response.status, data };
+        }
+
+        function showLogin() {
+            drawView.hidden = true;
+            loginView.hidden = false;
+            result.textContent = '';
+            $('#password').value = '';
+        }
+
+        function showDraw(name, target) {
+            loginView.hidden = true;
+            drawView.hidden = false;
+            $('#greeting').textContent = `Cześć, ${name}! Kliknij, aby wylosować osobę, której kupujesz prezent.`;
+            if (target) {
+                result.textContent = target;
+                drawButton.disabled = true;
+                drawButton.textContent = 'Już wylosowano';
+            } else {
+                result.textContent = '';
+                drawButton.disabled = false;
+                drawButton.textContent = 'Losuj';
+            }
+        }
+
+        $('#login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setStatus('');
+            const { ok, data } = await api('/api/login', 'POST', {
+                name: $('#name').value,
+                password: $('#password').value,
+            });
+            if (!ok) return setStatus(data.error || 'Błąd logowania.', true);
+            const me = await api('/api/me');
+            if (me.ok) showDraw(me.data.name, me.data.target);
+        });
+
+        drawButton.addEventListener('click', async () => {
+            setStatus('');
+            drawButton.disabled = true;
+            const { ok, data } = await api('/api/draw', 'POST');
+            if (!ok) {
+                drawButton.disabled = false;
+                if (data.error === 'Niezalogowany.') return showLogin();
+                return setStatus(data.error || 'Błąd losowania.', true);
+            }
+            result.textContent = data.target;
+            drawButton.textContent = 'Już wylosowano';
+        });
+
+        $('#logout').addEventListener('click', async () => {
+            await api('/api/logout', 'POST');
+            setStatus('');
+            showLogin();
+        });
+
+        (async () => {
+            const me = await api('/api/me');
+            if (me.ok) showDraw(me.data.name, me.data.target);
+            else showLogin();
+        })();
+    </script>
+</body>
+</html>
